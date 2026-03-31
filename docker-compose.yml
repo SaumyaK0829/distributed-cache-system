@@ -1,0 +1,57 @@
+version: "3.8"
+
+services:
+  # FastAPI Application
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - REDIS_HOST=redis
+      - POSTGRES_HOST=postgres
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - cache-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - cache-network
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DB=cachedb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - cache-network
+
+volumes:
+  postgres-data:
+
+networks:
+  cache-network:
+    driver: bridge
+
+
+# What's happening here:
+
+# 3 services — app, redis, postgres all talk to each other like separate machines but are on the same cache-network
+# depends_on — ensures Redis and Postgres start before the app
+# volumes: .:/app — maps your local code into the container, so --reload actually works
+# postgres-data volume — Postgres data persists even if the container restarts. Without this, your database wipes every restart!
+# alpine images — super lightweight Linux, keeps container sizes small
+# cache-network: bridge — isolated private network, services talk to each other by service name (e.g. redis, postgres) not IP addresses
