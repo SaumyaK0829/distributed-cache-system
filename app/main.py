@@ -22,6 +22,15 @@ def root():
     """Health check endpoint"""
     return {"message": "Distributed Cache System is running!"}
 
+@app.get("/cache/stats")
+def get_cache_stats():
+    """
+    Returns cache performance metrics.
+    Hit rate tells you how effective your cache is.
+    A good hit rate is > 80% in production.
+    """
+    return cache.get_stats()
+
 @app.post("/users/")
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
     """
