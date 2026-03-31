@@ -22,6 +22,36 @@ def root():
     """Health check endpoint"""
     return {"message": "Distributed Cache System is running!"}
 
+@app.get("/users/")
+def get_users(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
+    """
+    Get all users with pagination.
+    skip = how many records to skip (offset)
+    limit = how many records to return (page size)
+    
+    Example: skip=0, limit=10 → page 1
+             skip=10, limit=10 → page 2
+             skip=20, limit=10 → page 3
+    """
+    cache_key = f"users:skip={skip}:limit={limit}"
+    
+    # Check cache first
+    cached_users = cache.get(cache_key)
+    if cached_users:
+        return {"source": "cache", "users": cached_users, "skip": skip, "limit": limit}
+    
+    # Cache miss — fetch from PostgreSQL
+    users = db.query(User).offset(skip).limit(limit).all()
+    users_data = [
+        {"id": u.id, "username": u.username, "email": u.email}
+        for u in users
+    ]
+    
+    # Store in cache
+    cache.set(cache_key, users_data)
+    
+    return {"source": "database", "users": users_data, "skip": skip, "limit": limit}
+
 @app.get("/cache/stats")
 def get_cache_stats():
     """
