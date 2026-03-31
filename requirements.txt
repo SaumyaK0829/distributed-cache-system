@@ -1,0 +1,45 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+redis==5.0.1
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+pydantic==2.5.0
+pydantic-settings==2.1.0
+```
+
+**What are these?**
+- `fastapi` - Modern web framework for building APIs (like Express.js for Python)
+- `uvicorn` - Web server to run FastAPI
+- `redis` - Python library to talk to Redis cache
+- `psycopg2-binary` - Python library to talk to PostgreSQL
+- `sqlalchemy` - ORM (Object-Relational Mapping) - makes database queries easier
+- `pydantic` - Data validation library
+
+---
+
+### **Step 1.4: Create .gitignore**
+
+Open `.gitignore` and paste this:
+```
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
