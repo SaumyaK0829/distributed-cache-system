@@ -7,3 +7,4 @@ venv/
 .idea/
 *.log
 .DS_Store
+.env

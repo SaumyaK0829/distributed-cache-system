@@ -1,23 +1,22 @@
 version: "3.8"
 
 services:
-  # FastAPI Application
   app:
     build: .
     ports:
       - "8000:8000"
     volumes:
       - .:/app
-    environment:
-      - REDIS_HOST=redis
-      - POSTGRES_HOST=postgres
+    env_file:
+      - .env
     depends_on:
-      - redis
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - cache-network
 
-  # Redis Cache
   redis:
     image: redis:7-alpine
     ports:
@@ -25,17 +24,23 @@ services:
     networks:
       - cache-network
 
-  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     ports:
       - "5432:5432"
+    env_file:
+      - .env
     environment:
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=admin123
-      - POSTGRES_DB=cachedb
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - cache-network
 
@@ -46,8 +51,15 @@ networks:
   cache-network:
     driver: bridge
 
+# What changed and why:
 
-# What's happening here:
+# env_file: .env — Docker reads variables from .env automatically
+# ${POSTGRES_USER} — references the variable instead of hardcoding it
+# lru_cache() on get_settings() — settings are only loaded once and cached in memory, not re-read on every request
+# .env is in .gitignore — passwords never accidentally get committed
+
+
+# What's happening here - O:
 
 # 3 services — app, redis, postgres all talk to each other like separate machines but are on the same cache-network
 # depends_on — ensures Redis and Postgres start before the app

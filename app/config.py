@@ -1,7 +1,8 @@
 from pydantic_settings import BaseSettings
+from functools import lru_cache
 
 class Settings(BaseSettings):
-    """Application configuration settings"""
+    """Application configuration settings — reads from .env file"""
     
     # API Settings
     app_name: str = "Distributed Cache System"
@@ -11,7 +12,7 @@ class Settings(BaseSettings):
     redis_host: str = "redis"
     redis_port: int = 6379
     redis_db: int = 0
-    cache_ttl: int = 300  # Cache time-to-live in seconds (5 minutes)
+    cache_ttl: int = 300
     
     # PostgreSQL Configuration
     postgres_host: str = "postgres"
@@ -22,6 +23,15 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        case_sensitive = False
 
-# Create a global settings instance
-settings = Settings()
+@lru_cache()
+def get_settings() -> Settings:
+    """
+    Cache the settings object so .env is only read once.
+    lru_cache = Least Recently Used cache — Python's built-in memoization
+    """
+    return Settings()
+
+# Global settings instance
+settings = get_settings()
