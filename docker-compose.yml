@@ -1,5 +1,3 @@
-# version: "3.8"
-
 services:
   app:
     build: .
@@ -44,8 +42,31 @@ services:
     networks:
       - cache-network
 
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - cache-network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - cache-network
+
 volumes:
   postgres-data:
+  grafana-data:
 
 networks:
   cache-network:
@@ -57,9 +78,6 @@ networks:
 # ${POSTGRES_USER} — references the variable instead of hardcoding it
 # lru_cache() on get_settings() — settings are only loaded once and cached in memory, not re-read on every request
 # .env is in .gitignore — passwords never accidentally get committed
-
-
-# What's happening here - O:
 
 # 3 services — app, redis, postgres all talk to each other like separate machines but are on the same cache-network
 # depends_on — ensures Redis and Postgres start before the app

@@ -7,3 +7,4 @@ pydantic==2.5.0 # validates data types automatically
 pydantic-settings==2.1.0 # reads config from environment variables
 pytest==7.4.3
 httpx==0.24.1
+prometheus-client==0.19.0
