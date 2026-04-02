@@ -5,4 +5,5 @@ psycopg2-binary==2.9.9 # Python client to talk to PostgreSQL
 sqlalchemy==2.0.23 # ORM, lets you write Python instead of raw SQL
 pydantic==2.5.0 # validates data types automatically
 pydantic-settings==2.1.0 # reads config from environment variables
-
+pytest==7.4.3
+httpx==0.24.1
