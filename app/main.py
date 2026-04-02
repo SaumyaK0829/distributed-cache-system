@@ -5,12 +5,20 @@ from app.cache import cache
 from app.metrics import track_request, update_cache_metrics
 from pydantic import BaseModel
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import time
+
+# Rate limiter — uses client IP address to track requests
+limiter = Limiter(key_func=get_remote_address)
 
 # Initialize FastAPI app
 app = FastAPI(title="Distributed Cache System")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Pydantic model for creating a user (request body validation)
+# Pydantic model for creating a user
 class UserCreate(BaseModel):
     username: str
     email: str
@@ -22,15 +30,10 @@ def startup():
 
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
-    """
-    Middleware runs on EVERY request automatically.
-    We use it to track request count and latency.
-    Think of it like a toll booth — every request passes through it.
-    """
+    """Track request count and latency for every request"""
     start_time = time.time()
     response = await call_next(request)
     duration = time.time() - start_time
-
     track_request(
         method=request.method,
         endpoint=request.url.path,
@@ -46,11 +49,7 @@ def root():
 
 @app.get("/metrics")
 def metrics():
-    """
-    Prometheus scrapes this endpoint every 15 seconds.
-    Returns all metrics in Prometheus text format.
-    This is how Prometheus knows what's happening in our app.
-    """
+    """Prometheus scrapes this endpoint every 15 seconds"""
     stats = cache.get_stats()
     update_cache_metrics(
         hit_rate=stats["hit_rate_percent"],
@@ -60,107 +59,78 @@ def metrics():
 
 @app.get("/cache/stats")
 def get_cache_stats():
-    """
-    Returns cache performance metrics.
-    Hit rate tells you how effective your cache is.
-    A good hit rate is > 80% in production.
-    """
+    """Returns cache performance metrics"""
     return cache.get_stats()
 
 @app.get("/users/")
-def get_users(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def get_users(request: Request, skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     """
     Get all users with pagination.
     skip = how many records to skip (offset)
     limit = how many records to return (page size)
-
-    Example: skip=0, limit=10 → page 1
-             skip=10, limit=10 → page 2
-             skip=20, limit=10 → page 3
+    Rate limited to 10 requests per minute per IP
     """
     cache_key = f"users:skip={skip}:limit={limit}"
-
-    # Check cache first
     cached_users = cache.get(cache_key)
     if cached_users:
         return {"source": "cache", "users": cached_users, "skip": skip, "limit": limit}
-
-    # Cache miss — fetch from PostgreSQL
     users = db.query(User).offset(skip).limit(limit).all()
     users_data = [
         {"id": u.id, "username": u.username, "email": u.email}
         for u in users
     ]
-
-    # Store in cache
     cache.set(cache_key, users_data)
-
     return {"source": "database", "users": users_data, "skip": skip, "limit": limit}
 
 @app.post("/users/")
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def create_user(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     """
     Create a new user in PostgreSQL
-    and invalidate cache so fresh data is fetched next time
+    Rate limited to 5 requests per minute per IP
     """
-    # Check if user already exists
     existing = db.query(User).filter(User.username == user.username).first()
     if existing:
         raise HTTPException(status_code=400, detail="Username already exists")
-
-    # Save to PostgreSQL
     new_user = User(username=user.username, email=user.email)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-
-    # Invalidate cache for this user (so stale data isn't returned)
     cache.delete(f"user:{new_user.id}")
-
     return {"message": "User created", "user_id": new_user.id}
 
 @app.get("/users/{user_id}")
-def get_user(user_id: int, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def get_user(request: Request, user_id: int, db: Session = Depends(get_db)):
     """
-    Get user by ID — implements Cache-Aside pattern:
-    1. Check Redis first
-    2. If not found, fetch from PostgreSQL
-    3. Store in Redis for next time
+    Get user by ID — implements Cache-Aside pattern
+    Rate limited to 10 requests per minute per IP
     """
     cache_key = f"user:{user_id}"
-
-    # Step 1: Check cache
     cached_user = cache.get(cache_key)
     if cached_user:
         return {"source": "cache", "user": cached_user}
-
-    # Step 2: Cache miss — fetch from PostgreSQL
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-
-    # Step 3: Store in cache for next time
     user_data = {"id": user.id, "username": user.username, "email": user.email}
     cache.set(cache_key, user_data)
-
     return {"source": "database", "user": user_data}
 
 @app.delete("/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def delete_user(request: Request, user_id: int, db: Session = Depends(get_db)):
     """
-    Delete user from PostgreSQL and remove from cache
+    Delete user from PostgreSQL and cache
+    Rate limited to 5 requests per minute per IP
     """
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-
-    # Delete from PostgreSQL
     db.delete(user)
     db.commit()
-
-    # Delete from cache too (very important!)
     cache.delete(f"user:{user_id}")
-
     return {"message": f"User {user_id} deleted"}
 
 # What's happening here:
