@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from sqlalchemy.orm import Session
-from app.database import get_db, init_db, User
+from app.database import get_db, init_db, User, SessionLocal
 from app.cache import cache
 from app.metrics import track_request, update_cache_metrics
 from pydantic import BaseModel
@@ -23,10 +23,52 @@ class UserCreate(BaseModel):
     username: str
     email: str
 
+def warm_cache():
+    """
+    Pre-load the first page of users into cache on startup.
+    Solves the 'cold start' problem — when app restarts,
+    cache is empty and every request hits the database.
+    Cache warming pre-loads frequently accessed data so
+    first requests are fast.
+    """
+    try:
+        db = SessionLocal()
+
+        # Pre-load first page of users
+        users = db.query(User).limit(10).all()
+        if users:
+            users_data = [
+                {"id": u.id, "username": u.username, "email": u.email}
+                for u in users
+            ]
+            cache.set("users:skip=0:limit=10", users_data)
+
+            # Pre-load each individual user too
+            for user in users:
+                user_data = {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email
+                }
+                cache.set(f"user:{user.id}", user_data)
+
+            print(f"Cache warmed with {len(users)} users ✅")
+        else:
+            print("No users to warm cache with")
+
+        db.close()
+    except Exception as e:
+        print(f"Cache warming failed: {e}")
+
 @app.on_event("startup")
 def startup():
-    """Initialize database tables when app starts"""
+    """
+    Initialize database tables and warm up the cache.
+    Cache warming = pre-loading frequently accessed data
+    so first requests are fast instead of hitting the database.
+    """
     init_db()
+    warm_cache()
 
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
@@ -70,6 +112,10 @@ def get_users(request: Request, skip: int = 0, limit: int = 10, db: Session = De
     skip = how many records to skip (offset)
     limit = how many records to return (page size)
     Rate limited to 10 requests per minute per IP
+
+    Example: skip=0, limit=10 → page 1
+             skip=10, limit=10 → page 2
+             skip=20, limit=10 → page 3
     """
     cache_key = f"users:skip={skip}:limit={limit}"
     cached_users = cache.get(cache_key)
@@ -104,7 +150,10 @@ def create_user(request: Request, user: UserCreate, db: Session = Depends(get_db
 @limiter.limit("10/minute")
 def get_user(request: Request, user_id: int, db: Session = Depends(get_db)):
     """
-    Get user by ID — implements Cache-Aside pattern
+    Get user by ID — implements Cache-Aside pattern:
+    1. Check Redis first
+    2. If not found, fetch from PostgreSQL
+    3. Store in Redis for next time
     Rate limited to 10 requests per minute per IP
     """
     cache_key = f"user:{user_id}"
